@@ -327,7 +327,12 @@ func (db *InfluxDB2) RotateRootCredentials(ctx context.Context, statements []str
 		return db.rawConfig, fmt.Errorf("Failed to find old authorization")
 	}
 
+	description := "Vault root token"
+
 	auth := &domain.Authorization{
+		AuthorizationUpdateRequest: domain.AuthorizationUpdateRequest{
+			Description: &description,
+		},
 		OrgID:       org.Id,
 		Permissions: rootAuth.Permissions, // inherit permissions because they might vary
 		UserID:      rootUser.Id,
