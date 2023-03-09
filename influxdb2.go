@@ -133,7 +133,7 @@ func (db *InfluxDB2) CreateUser(ctx context.Context, statements dbplugin.Stateme
 
 	if user == nil {
 		user, err := client.UsersAPI().CreateUserWithName(ctx, username)
-		if err != nil {
+		if user == nil || err != nil {
 			err_cause := fmt.Errorf("Failed to create user: %w", err)
 			return "", "", db.attemptRollbackUser(ctx, client, user, err_cause)
 		}
@@ -154,8 +154,11 @@ func (db *InfluxDB2) CreateUser(ctx context.Context, statements dbplugin.Stateme
 	}
 
 	authCreated, err := client.AuthorizationsAPI().CreateAuthorization(ctx, auth)
-	if err != nil {
+	if authCreated == nil || err != nil {
 		err_cause := fmt.Errorf("Failed to create authorization: %w", err)
+		if !db.EphemeralUsers {
+			return "", "", err_cause
+		}
 		return "", "", db.attemptRollbackUser(ctx, client, user, err_cause)
 	}
 
@@ -168,6 +171,9 @@ func (db *InfluxDB2) CreateUser(ctx context.Context, statements dbplugin.Stateme
 }
 
 func (db *InfluxDB2) attemptRollbackUser(ctx context.Context, client influxdb2.Client, user *domain.User, err_cause error) error {
+	if user == nil {
+		return err_cause
+	}
 	err := client.UsersAPI().DeleteUser(ctx, user)
 	if err != nil {
 		return fmt.Errorf("%s; Failed to rollback user: %w", err_cause, err)
@@ -176,6 +182,9 @@ func (db *InfluxDB2) attemptRollbackUser(ctx context.Context, client influxdb2.C
 }
 
 func (db *InfluxDB2) attemptRollbackAuth(ctx context.Context, client influxdb2.Client, auth *domain.Authorization, err_cause error) error {
+	if auth == nil {
+		return err_cause
+	}
 	err := client.AuthorizationsAPI().DeleteAuthorization(ctx, auth)
 	if err != nil {
 		return fmt.Errorf("%s; Failed to rollback authorization: %w", err_cause, err)
