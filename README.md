@@ -114,6 +114,14 @@ A role's `creation_statements` define which permissions the issued authorization
 * `write_bucket`: A list of bucket names to allow write access to.
 * `org`: A valid organization name the user should belong to. Defaults to the connection's organization.
 
+### Credentials
+InfluxDB v2 is a bit weird with authentication and authorization. User accounts are used in some places, but the entity providing authentication and describing resource access (authorization) is called Authorization (~ API Key). It works like a Vault token. A user name therefore is separate from the duties Vault usually fulfills.
+
+Generated user names match the Vault database role name by default to avoid unexpected behavior in InfluxDB. You can change that behavior by specifying an alternative username template. Mind that by default, this plugin revokes Authorizations only.
+
+* `username_template`: A template describing username generation. See the Vault docs for details. Defaults to the database role name.
+* `ephemeral_users`: When the template above generates unique usernames, enable deletion of user accounts during lease revocation. Defaults to `false`.
+
 ## Notes
 * This plugin is in very early development.
 * Ironically, to support the new InfluxDB API, this plugin needs to be written using the old (v4) SDK for Vault database plugins, which is deprecated. The reason is that tokens must be generated on the InfluxDB server and cannot be forced by Vault. Until there is a workaround, this plugin might stop working with future Vault releases once support for the old SDK is removed entirely.
