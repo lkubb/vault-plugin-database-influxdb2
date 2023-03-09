@@ -16,8 +16,11 @@ import (
 )
 
 const (
-	influxdb2TypeName       = "influxdb2"
-	defaultUserNameTemplate = `{{ printf "v_%s_%s_%s_%s" (.DisplayName | truncate 15) (.RoleName | truncate 15) (random 20) (unix_time) | truncate 100 | replace "-" "_" | lowercase }}`
+	influxdb2TypeName = "influxdb2"
+	// defaultUserNameTemplate = `{{ printf "v_%s_%s_%s_%s" (.DisplayName | truncate 15) (.RoleName | truncate 15) (random 20) (unix_time) | truncate 100 | replace "-" "_" | lowercase }}`
+	// Ephemeral usernames are a bad idea with InfluxDB v2 since created tasks (etc?) are bound to a specific user
+	// Since usernames are irrelevant for authentication or authorization (ironically), by default, use one bound to the role
+	defaultUserNameTemplate = `{{ printf "v_%s" (.RoleName) | replace "-" "_" | lowercase }}`
 )
 
 // Fail to compile if InfluxDB2 does not adhere to interface
@@ -38,6 +41,10 @@ func New() (interface{}, error) {
 type InfluxDB2 struct {
 	*influxDB2ConnectionProducer
 	mux sync.RWMutex
+
+	// When the usernameTemplate generates unique usernames, we need to delete the user.
+	// By default, this plugin maps usernames to Vault roles, which should not be deleted regularly.
+	EphemeralUsers bool `json:"ephemeral_users" structs:"ephemeral_users" mapstructure:"ephemeral_users"`
 
 	usernameProducer template.StringTemplate
 
@@ -117,19 +124,27 @@ func (db *InfluxDB2) CreateUser(ctx context.Context, statements dbplugin.Stateme
 		return "", "", fmt.Errorf("Could not parse creation statement permissions: %w", err)
 	}
 
-	// We need an actual user account for vault to keep track of
-	user, err := client.UsersAPI().CreateUserWithName(ctx, username)
-	if err != nil {
-		err_cause := fmt.Errorf("Failed to create user: %w", err)
-		return "", "", db.attemptRollbackUser(ctx, client, user, err_cause)
+	// We need an actual user account for vault to keep track of for ephemeral users
+	var user *domain.User
+
+	if !db.EphemeralUsers {
+		user, _ = client.UsersAPI().FindUserByName(ctx, username)
 	}
 
-	// In case multiple organizations per user should be supported,
-	// this would need an update - eg. org as owner of authorization, orgs as user membership
-	_, err = client.OrganizationsAPI().AddMember(ctx, &org, user)
-	if err != nil {
-		err_cause := fmt.Errorf("Failed to add user to organization: %w", err)
-		return "", "", db.attemptRollbackUser(ctx, client, user, err_cause)
+	if user == nil {
+		user, err := client.UsersAPI().CreateUserWithName(ctx, username)
+		if err != nil {
+			err_cause := fmt.Errorf("Failed to create user: %w", err)
+			return "", "", db.attemptRollbackUser(ctx, client, user, err_cause)
+		}
+
+		// In case multiple organizations per user should be supported,
+		// this would need an update - eg. org as owner of authorization, orgs as user membership
+		_, err = client.OrganizationsAPI().AddMember(ctx, &org, user)
+		if err != nil {
+			err_cause := fmt.Errorf("Failed to add user to organization: %w", err)
+			return "", "", db.attemptRollbackUser(ctx, client, user, err_cause)
+		}
 	}
 
 	auth := &domain.Authorization{
@@ -144,7 +159,12 @@ func (db *InfluxDB2) CreateUser(ctx context.Context, statements dbplugin.Stateme
 		return "", "", db.attemptRollbackUser(ctx, client, user, err_cause)
 	}
 
-	return username, *authCreated.Token, nil
+	if db.EphemeralUsers {
+		// for ephemeral users, we need the actual username to keep track of
+		return username, *authCreated.Token, nil
+	}
+	// for non-ephemeral users, we need to delete the actual authorization later
+	return *authCreated.Id, *authCreated.Token, nil
 }
 
 func (db *InfluxDB2) attemptRollbackUser(ctx context.Context, client influxdb2.Client, user *domain.User, err_cause error) error {
@@ -169,6 +189,13 @@ func (db *InfluxDB2) RenewUser(ctx context.Context, statements dbplugin.Statemen
 }
 
 func (db *InfluxDB2) RevokeUser(ctx context.Context, _ dbplugin.Statements, username string) error {
+	if db.EphemeralUsers {
+		return db.revokeEphemeralUser(ctx, username)
+	}
+	return db.revokeUserAuth(ctx, username)
+}
+
+func (db *InfluxDB2) revokeEphemeralUser(ctx context.Context, username string) error {
 	db.Lock()
 	defer db.Unlock()
 
@@ -182,11 +209,40 @@ func (db *InfluxDB2) RevokeUser(ctx context.Context, _ dbplugin.Statements, user
 		return fmt.Errorf("Failed to lookup user: %w", err)
 	}
 
-	// Deleting a user also revokes any authorizations associated with it
+	// Deleting a user does not always revoke all authorizations associated with it
+	auths, err := client.AuthorizationsAPI().FindAuthorizationsByUserID(ctx, *user.Id)
+	if err != nil {
+		return fmt.Errorf("Failed to lookup user authorizations: %w", err)
+	}
+
+	for _, auth := range *auths {
+		err = client.AuthorizationsAPI().DeleteAuthorization(ctx, &auth)
+		if err != nil {
+			return fmt.Errorf("Failed to delete authorization: %w", err)
+		}
+	}
+
 	err = client.UsersAPI().DeleteUser(ctx, user)
 	if err != nil {
 		return fmt.Errorf("Failed to revoke user: %w", err)
 	}
+	return nil
+}
+
+func (db *InfluxDB2) revokeUserAuth(ctx context.Context, authId string) error {
+	db.Lock()
+	defer db.Unlock()
+
+	client, err := db.getConnection(ctx)
+	if err != nil {
+		return fmt.Errorf("Could not create connection: %w", err)
+	}
+
+	err = client.AuthorizationsAPI().DeleteAuthorizationWithID(ctx, authId)
+	if err != nil {
+		return fmt.Errorf("Failed to delete authorization: %w", err)
+	}
+
 	return nil
 }
 
