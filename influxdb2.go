@@ -132,7 +132,7 @@ func (db *InfluxDB2) CreateUser(ctx context.Context, statements dbplugin.Stateme
 	}
 
 	if user == nil {
-		user, err := client.UsersAPI().CreateUserWithName(ctx, username)
+		user, err = client.UsersAPI().CreateUserWithName(ctx, username)
 		if user == nil || err != nil {
 			err_cause := fmt.Errorf("Failed to create user: %w", err)
 			return "", "", db.attemptRollbackUser(ctx, client, user, err_cause)
