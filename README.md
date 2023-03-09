@@ -121,6 +121,7 @@ Generated user names match the Vault database role name by default to avoid unex
 
 * `username_template`: A template describing username generation. See the Vault docs for details. Defaults to the database role name.
 * `ephemeral_users`: When the template above generates unique usernames, enable deletion of user accounts during lease revocation. Defaults to `false`.
+* `description_template`: A template describing the authorization. See the Vault docs for details. Defaults to the requesting token's display name + database role name.
 
 ## Notes
 * This plugin is in very early development.

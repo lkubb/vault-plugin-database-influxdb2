@@ -21,6 +21,7 @@ const (
 	// Ephemeral usernames are a bad idea with InfluxDB v2 since created tasks (etc?) are bound to a specific user
 	// Since usernames are irrelevant for authentication or authorization (ironically), by default, use one bound to the role
 	defaultUserNameTemplate = `{{ printf "v_%s" (.RoleName) | replace "-" "_" | lowercase }}`
+	defaultDescriptionTemplate = `{{ printf "%s %s" (.DisplayName) (.RoleName) }}`
 )
 
 // Fail to compile if InfluxDB2 does not adhere to interface
@@ -47,6 +48,7 @@ type InfluxDB2 struct {
 	EphemeralUsers bool `json:"ephemeral_users" structs:"ephemeral_users" mapstructure:"ephemeral_users"`
 
 	usernameProducer template.StringTemplate
+	descriptionProducer template.StringTemplate
 
 	// lookup caches
 	buckets  map[string]*domain.Bucket
@@ -74,9 +76,28 @@ func (db *InfluxDB2) Init(ctx context.Context, conf map[string]interface{}, veri
 	}
 	db.usernameProducer = up
 
+	descriptionTemplate, err := strutil.GetString(conf, "description_template")
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve description_template: %w", err)
+	}
+	if descriptionTemplate == "" {
+		descriptionTemplate = defaultDescriptionTemplate
+	}
+
+	dp, err := template.NewTemplate(template.Template(descriptionTemplate))
+	if err != nil {
+		return nil, fmt.Errorf("unable to initialize description template: %w", err)
+	}
+	db.descriptionProducer = dp
+
 	_, err = db.usernameProducer.Generate(UsernameMetadata{})
 	if err != nil {
 		return nil, fmt.Errorf("invalid username template: %w", err)
+	}
+
+	_, err = db.descriptionProducer.Generate(UsernameMetadata{})
+	if err != nil {
+		return nil, fmt.Errorf("invalid description template: %w", err)
 	}
 
 	return db.influxDB2ConnectionProducer.Init(ctx, conf, verifyConnection)
@@ -98,6 +119,11 @@ func (db *InfluxDB2) CreateUser(ctx context.Context, statements dbplugin.Stateme
 	username, err := db.usernameProducer.Generate(usernameConfig)
 	if err != nil {
 		return "", "", fmt.Errorf("Could not generate username: %w", err)
+	}
+
+	description, err := db.descriptionProducer.Generate(usernameConfig)
+	if err != nil {
+		return "", "", fmt.Errorf("Could not generate description: %w", err)
 	}
 
 	defs, err := newCreationStatement(statements)
@@ -148,6 +174,9 @@ func (db *InfluxDB2) CreateUser(ctx context.Context, statements dbplugin.Stateme
 	}
 
 	auth := &domain.Authorization{
+		AuthorizationUpdateRequest: domain.AuthorizationUpdateRequest{
+			Description: &description,
+		},
 		OrgID:       org.Id,
 		Permissions: permissions,
 		UserID:      user.Id,
