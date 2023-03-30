@@ -20,7 +20,7 @@ const (
 	// defaultUserNameTemplate = `{{ printf "v_%s_%s_%s_%s" (.DisplayName | truncate 15) (.RoleName | truncate 15) (random 20) (unix_time) | truncate 100 | replace "-" "_" | lowercase }}`
 	// Ephemeral usernames are a bad idea with InfluxDB v2 since created tasks (etc?) are bound to a specific user
 	// Since usernames are irrelevant for authentication or authorization (ironically), by default, use one bound to the role
-	defaultUserNameTemplate = `{{ printf "v_%s" (.RoleName) | replace "-" "_" | lowercase }}`
+	defaultUserNameTemplate    = `{{ printf "v_%s" (.RoleName) | replace "-" "_" | lowercase }}`
 	defaultDescriptionTemplate = `{{ printf "%s %s" (.DisplayName) (.RoleName) }}`
 )
 
@@ -47,7 +47,7 @@ type InfluxDB2 struct {
 	// By default, this plugin maps usernames to Vault roles, which should not be deleted regularly.
 	EphemeralUsers bool `json:"ephemeral_users" structs:"ephemeral_users" mapstructure:"ephemeral_users"`
 
-	usernameProducer template.StringTemplate
+	usernameProducer    template.StringTemplate
 	descriptionProducer template.StringTemplate
 
 	// lookup caches
