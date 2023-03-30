@@ -145,7 +145,7 @@ func (db *InfluxDB2) CreateUser(ctx context.Context, statements dbplugin.Stateme
 		return "", "", fmt.Errorf("Failed fetching organization %s: %w", db.Organization, err)
 	}
 
-	permissions, err := db.hydratePermissions(defs, client)
+	permissions, err := db.hydratePermissions(defs, org, client)
 	if err != nil {
 		return "", "", fmt.Errorf("Could not parse creation statement permissions: %w", err)
 	}
@@ -388,13 +388,14 @@ func (db *InfluxDB2) SetCredentials(ctx context.Context, statements dbplugin.Sta
 	return "", "", dbutil.Unimplemented()
 }
 
-func (db *InfluxDB2) hydratePermissions(defs *creationStatement, client influxdb2.Client) (*[]domain.Permission, error) {
+func (db *InfluxDB2) hydratePermissions(defs *creationStatement, org domain.Organization, client influxdb2.Client) (*[]domain.Permission, error) {
 	var perms []domain.Permission
 	for _, resource := range defs.Read {
 		perm := &domain.Permission{
 			Action: domain.PermissionActionRead,
 			Resource: domain.Resource{
-				Type: resource,
+				Type:  resource,
+				OrgID: org.Id,
 			},
 		}
 		perms = append(perms, *perm)
@@ -403,7 +404,8 @@ func (db *InfluxDB2) hydratePermissions(defs *creationStatement, client influxdb
 		perm := &domain.Permission{
 			Action: domain.PermissionActionWrite,
 			Resource: domain.Resource{
-				Type: resource,
+				Type:  resource,
+				OrgID: org.Id,
 			},
 		}
 		perms = append(perms, *perm)
