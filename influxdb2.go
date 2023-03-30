@@ -390,26 +390,34 @@ func (db *InfluxDB2) SetCredentials(ctx context.Context, statements dbplugin.Sta
 
 func (db *InfluxDB2) hydratePermissions(defs *creationStatement, org domain.Organization, client influxdb2.Client) (*[]domain.Permission, error) {
 	var perms []domain.Permission
+	// read all of type
 	for _, resource := range defs.Read {
 		perm := &domain.Permission{
 			Action: domain.PermissionActionRead,
 			Resource: domain.Resource{
-				Type:  resource,
-				OrgID: org.Id,
+				Type: resource,
 			},
+		}
+		// There is no concept of sub-organizations
+		if resource != "orgs" {
+			perm.Resource.OrgID = org.Id
 		}
 		perms = append(perms, *perm)
 	}
+	// write all of type
 	for _, resource := range defs.Write {
 		perm := &domain.Permission{
 			Action: domain.PermissionActionWrite,
 			Resource: domain.Resource{
-				Type:  resource,
-				OrgID: org.Id,
+				Type: resource,
 			},
+		}
+		if resource != "orgs" {
+			perm.Resource.OrgID = org.Id
 		}
 		perms = append(perms, *perm)
 	}
+	// read specific buckets
 	for _, name := range defs.ReadBucket {
 		bucket, err := db.getBucketByName(name, client)
 		if err != nil {
@@ -424,6 +432,7 @@ func (db *InfluxDB2) hydratePermissions(defs *creationStatement, org domain.Orga
 		}
 		perms = append(perms, *perm)
 	}
+	// write specific buckets
 	for _, name := range defs.WriteBucket {
 		bucket, err := db.getBucketByName(name, client)
 		if err != nil {
